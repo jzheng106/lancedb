@@ -48,6 +48,7 @@ from ._blob import (
 from .types import BlobMode
 from lancedb.arrow import peek_reader
 from lancedb.background_loop import LOOP, embedding_executor
+from lancedb.prewarm import PrewarmDataResult
 from lancedb.job import AsyncJob, Job, _typed_job
 from lancedb.compaction import CompactionResult
 from .dependencies import (
@@ -2016,7 +2017,7 @@ class Table(ABC):
         *,
         filter: Optional[str] = None,
         concurrency: Optional[int] = None,
-    ) -> Job[None]:
+    ) -> Job[PrewarmDataResult]:
         """Submit a remote data-cache prewarm and return its durable job.
 
         Requires a compatible SQL PREWARM server and Flight SQL connectivity.
@@ -2032,8 +2033,9 @@ class Table(ABC):
         are not retried through REST or with settings removed.
 
         Returns once accepted. ``job.wait()`` waits for warming to finish and
-        returns None. Save ``job.id`` to resume with ``db.open_job(id)``. A wait
-        timeout does not cancel the operation. After ``job.refresh()``,
+        returns [PrewarmDataResult][lancedb.prewarm.PrewarmDataResult].
+        Save ``job.id`` to resume with ``db.open_job(id)``. A wait timeout does
+        not cancel the operation. After ``job.refresh()``,
         ``job.spec["table_version"]`` identifies the pinned source version.
 
         Examples
@@ -4797,7 +4799,7 @@ class LanceTable(Table):
         *,
         filter: Optional[str] = None,
         concurrency: Optional[int] = None,
-    ) -> Job[None]:
+    ) -> Job[PrewarmDataResult]:
         return Job(
             LOOP.run(
                 self._table.prewarm_data_async(
@@ -7244,7 +7246,7 @@ class AsyncTable:
         *,
         filter: Optional[str] = None,
         concurrency: Optional[int] = None,
-    ) -> AsyncJob[None]:
+    ) -> AsyncJob[PrewarmDataResult]:
         """Submit data prewarm and return a durable handle after acceptance.
 
         See [Table.prewarm_data_async][lancedb.table.Table.prewarm_data_async]
@@ -7257,10 +7259,11 @@ class AsyncTable:
         ...     ["video"], filter="quality > 0.7", concurrency=4)
         >>> await job.wait()  # doctest: +SKIP
         """
-        return AsyncJob(
+        return _typed_job(
             await self._inner.prewarm_data_async(
                 columns, filter=filter, concurrency=concurrency
-            )
+            ),
+            PrewarmDataResult.from_json,
         )
 
     async def wait_for_index(
