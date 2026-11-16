@@ -7849,8 +7849,8 @@ def test_remote_fts_and_rejects_legacy_server():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("asynchronous", [False, True])
-@pytest.mark.parametrize("legacy", [False, True])
-async def test_remote_data_prewarm_sql_receipt_and_durable_job(asynchronous, legacy):
+@pytest.mark.parametrize("mode", ["job", "columns", "filtered", "defaults"])
+async def test_remote_data_prewarm_sql_receipt_and_durable_job(asynchronous, mode):
     flight = pytest.importorskip("pyarrow.flight")
     polls = []
 
@@ -7911,8 +7911,17 @@ async def test_remote_data_prewarm_sql_receipt_and_durable_job(asynchronous, leg
         if asynchronous:
             db = await lancedb.connect_async(**kwargs)
             table = await db.create_table("test", [{"id": 1}])
-            if legacy:
+            if mode == "columns":
                 assert await table.prewarm_data(["payload"]) is None
+            elif mode == "filtered":
+                assert (
+                    await table.prewarm_data(
+                        columns=["attrs.score"], filter="id >= 8", concurrency=4
+                    )
+                    is None
+                )
+            elif mode == "defaults":
+                assert await table.prewarm_data() is None
             else:
                 job = await table.prewarm_data_async(
                     ["attrs.score"], filter="id >= 8", concurrency=4
@@ -7929,8 +7938,17 @@ async def test_remote_data_prewarm_sql_receipt_and_durable_job(asynchronous, leg
         else:
             db = lancedb.connect(**kwargs)
             table = db.create_table("test", [{"id": 1}])
-            if legacy:
+            if mode == "columns":
                 assert table.prewarm_data(["payload"]) is None
+            elif mode == "filtered":
+                assert (
+                    table.prewarm_data(
+                        columns=["attrs.score"], filter="id >= 8", concurrency=4
+                    )
+                    is None
+                )
+            elif mode == "defaults":
+                assert table.prewarm_data() is None
             else:
                 job = table.prewarm_data_async(
                     ["attrs.score"], filter="id >= 8", concurrency=4
@@ -7945,9 +7963,12 @@ async def test_remote_data_prewarm_sql_receipt_and_durable_job(asynchronous, leg
                 assert job.wait().bytes_read is None
     assert len(server.tickets) == 1
     assert b"PREWARM" in server.tickets[0]
-    if legacy:
+    if mode != "job":
         assert not polls
+    if mode == "columns":
         assert b'"payload"' in server.tickets[0]
+    elif mode == "defaults":
+        assert b"SELECT *" in server.tickets[0]
     else:
         assert b'"attrs"."score"' in server.tickets[0]
         assert b"concurrency = 4" in server.tickets[0]
@@ -7967,7 +7988,8 @@ async def test_remote_data_prewarm_sql_receipt_and_durable_job(asynchronous, leg
         {"concurrency": 1.5},
     ],
 )
-def test_remote_data_prewarm_validates_before_submission(options):
+@pytest.mark.parametrize("method", ["prewarm_data", "prewarm_data_async"])
+def test_remote_data_prewarm_validates_before_submission(options, method):
     flight = pytest.importorskip("pyarrow.flight")
 
     class UnusedServer(flight.FlightServerBase):
@@ -7982,7 +8004,7 @@ def test_remote_data_prewarm_validates_before_submission(options):
     server = UnusedServer()
     with _mock_remote_table_with_sql(server) as table:
         with pytest.raises(ValueError):
-            table.prewarm_data_async(**options)
+            getattr(table, method)(**options)
     assert not server.tickets
 
 
